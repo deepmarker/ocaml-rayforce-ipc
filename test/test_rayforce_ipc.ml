@@ -2,7 +2,8 @@ open Core
 open Rayforce_ipc
 
 let sym s = Value.Sym (Sym.intern s)
-let syms l = Value.Syms (Array.of_list_map l ~f:Sym.intern)
+let syms_of l = Value.Syms (Array.of_list_map l ~f:Sym.intern)
+let syms = syms_of
 
 let roundtrip v =
   let buf = Iobuf.create ~len:(Value.size v) in
@@ -59,6 +60,50 @@ let test_vectors () =
   check_same "strings" (Value.Strings [| ""; "a"; "the quick brown fox" |]);
   check_same "empty syms" (Value.Syms [||]);
   check_same "empty ints" (Value.Ints [||])
+;;
+
+let test_columns () =
+  let ints = Column.i64 ~capacity:1 () in
+  let syms = Column.sym ~capacity:1 () in
+  let flags = Column.bool ~capacity:1 () in
+  let px = Column.f64 ~capacity:1 () in
+  (* Capacity 1 with four rows: the growth path is the one that has to hold
+     the rows it already had. *)
+  List.iteri [ "BTCUSDT"; "ETHUSDT"; "BTCUSDT"; "SOLUSDT" ] ~f:(fun i s ->
+    Column.add_int ints (i * 1000);
+    Column.add_sym syms (Sym.intern s);
+    Column.add_bool flags (i % 2 = 0);
+    Column.add_float px (Float.of_int i /. 4.));
+  Alcotest.(check int) "rows" 4 (Column.length ints);
+  Alcotest.(check int) "value survives growth" 2000 (Column.get_int ints 2);
+  Alcotest.(check string)
+    "sym survives growth"
+    "SOLUSDT"
+    (Sym.to_string (Column.get_sym syms 3));
+  Alcotest.(check bool) "bool" true (Column.get_bool flags 0);
+  Alcotest.(check (float 0.)) "float" 0.75 (Column.get_float px 3);
+  let table =
+    Value.table
+      [ "i", Value.Col ints
+      ; "s", Value.Col syms
+      ; "f", Value.Col flags
+      ; "px", Value.Col px
+      ]
+  in
+  let got = roundtrip table in
+  Alcotest.(check string)
+    "a built column decodes as the vector it is"
+    (Sexp.to_string
+       (Value.sexp_of_t
+          (Value.table
+             [ "i", Value.Ints [| 0L; 1000L; 2000L; 3000L |]
+             ; "s", syms_of [ "BTCUSDT"; "ETHUSDT"; "BTCUSDT"; "SOLUSDT" ]
+             ; "f", Value.Bools [| true; false; true; false |]
+             ; "px", Value.Floats [| 0.; 0.25; 0.5; 0.75 |]
+             ])))
+    (Sexp.to_string (Value.sexp_of_t got));
+  Column.clear ints;
+  Alcotest.(check int) "clear drops the rows" 0 (Column.length ints)
 ;;
 
 let test_compound () =
@@ -184,6 +229,7 @@ let () =
         ; Alcotest.test_case "vectors" `Quick test_vectors
         ; Alcotest.test_case "compound" `Quick test_compound
         ; Alcotest.test_case "table accessors" `Quick test_table_accessors
+        ; Alcotest.test_case "columns" `Quick test_columns
         ] )
     ; ( "frames"
       , [ Alcotest.test_case "round trip" `Quick test_frame

@@ -1,41 +1,5 @@
 open! Core
 
-(* Type tags, from rayforce's include/rayforce.h. A vector carries the tag
-   itself, an atom of the same type carries its negation, and both 126 and
-   127 are wire-only markers with no vector form. *)
-module Tag = struct
-  let list = 0
-  let bool = 1
-  let u8 = 2
-  let i16 = 3
-  let i32 = 4
-  let i64 = 5
-  let f64 = 7
-  let date = 8
-  let timestamp = 10
-  let sym = 12
-  let str = 13
-  let table = 98
-  let dict = 99
-
-  (* Types this library does not decode. They are named so that meeting one
-     reports what it is instead of reading its first bytes as a length. *)
-  let undecoded =
-    [ 6, "f32"
-    ; 9, "time"
-    ; 11, "guid"
-    ; 97, "index"
-    ; 100, "lambda"
-    ; 101, "unary builtin"
-    ; 102, "binary builtin"
-    ; 103, "variadic builtin"
-    ]
-  ;;
-
-  let null = 126
-  let error = 127
-end
-
 (* The schema names of a table are the one place the C serializer writes a
    non-zero attrs byte: RAY_SYM_W64, the index width of the vector it came
    from. The decoder ignores it, but writing the same byte keeps our frames
@@ -61,6 +25,7 @@ type t =
   | Timestamps of int64 array
   | Syms of Sym.t array
   | Strings of string array
+  | Col of Column.t
   | List of t array
   | Table of column array
   | Dict of t * t
@@ -83,6 +48,7 @@ let rec length = function
   | Floats a -> Array.length a
   | Syms a -> Array.length a
   | Strings a -> Array.length a
+  | Col c -> Column.length c
   | List a -> Array.length a
   | Table cols -> if Array.is_empty cols then 0 else length cols.(0).data
   | Dict (k, _) -> length k
@@ -130,7 +96,20 @@ let table cols =
 let atom n = 2 + n
 let vec n = 10 + n
 let cstring s = String.length s + 1
-let sym_bytes a = Array.sum (module Int) a ~f:(fun s -> cstring (Sym.to_string s))
+
+(* [Array.sum (module Int)] costs an indirect call per element -- it reaches
+   its addition through a first-class module, which nothing inlines. A
+   column is sized once per row before it is written, so that call was
+   showing up as several percent of a producer's whole runtime. *)
+let sum_by a ~f =
+  let total = ref 0 in
+  for i = 0 to Array.length a - 1 do
+    total := !total + f (Array.unsafe_get a i)
+  done;
+  !total
+;;
+
+let sym_bytes a = sum_by a ~f:Sym.wire_len
 
 let rec size = function
   | Null -> 1
@@ -146,12 +125,13 @@ let rec size = function
   | Ints a | Timestamps a -> vec (Array.length a * 8)
   | Floats a -> vec (Array.length a * 8)
   | Syms a -> vec (sym_bytes a)
-  | Strings a -> vec (Array.sum (module Int) a ~f:(fun s -> 8 + String.length s))
-  | List a -> vec (Array.sum (module Int) a ~f:size)
+  | Strings a -> vec (sum_by a ~f:(fun s -> 8 + String.length s))
+  | Col c -> vec (Column.wire_size c)
+  | List a -> vec (sum_by a ~f:size)
   | Table cols ->
     2
-    + vec (Array.sum (module Int) cols ~f:(fun c -> cstring (Sym.to_string c.name)))
-    + vec (Array.sum (module Int) cols ~f:(fun c -> size c.data))
+    + vec (sum_by cols ~f:(fun c -> Sym.wire_len c.name))
+    + vec (sum_by cols ~f:(fun c -> size c.data))
   | Dict (k, v) -> 2 + size k + size v
 ;;
 
@@ -175,9 +155,18 @@ let fill_cstring buf s =
   Iobuf.Fill.char buf '\000'
 ;;
 
+(* Every loop below iterates by index rather than through [Array.iter]: the
+   closure it would take is called once per row and is not inlined, which a
+   column's worth of rows makes worth avoiding. *)
+let fill_each a ~f =
+  for i = 0 to Array.length a - 1 do
+    f (Array.unsafe_get a i)
+  done
+;;
+
 let fill_syms ?attrs buf a =
   fill_vec_head ?attrs buf Tag.sym (Array.length a);
-  Array.iter a ~f:(fun s -> fill_cstring buf (Sym.to_string s))
+  fill_each a ~f:(fun s -> fill_cstring buf (Sym.to_string s))
 ;;
 
 let rec fill buf t =
@@ -220,34 +209,37 @@ let rec fill buf t =
     Iobuf.Fill.stringo buf s
   | Bools a ->
     fill_vec_head buf Tag.bool (Array.length a);
-    Array.iter a ~f:(fun b -> Iobuf.Fill.uint8_trunc buf (Bool.to_int b))
+    fill_each a ~f:(fun b -> Iobuf.Fill.uint8_trunc buf (Bool.to_int b))
   | Bytes b ->
     fill_vec_head buf Tag.u8 (Bigstring.length b);
     Iobuf.Fill.bigstringo buf b
   | Ints a ->
     fill_vec_head buf Tag.i64 (Array.length a);
-    Array.iter a ~f:(Iobuf.Fill.int64_t_le buf)
+    fill_each a ~f:(fun n -> Iobuf.Fill.int64_t_le buf n)
   | Timestamps a ->
     fill_vec_head buf Tag.timestamp (Array.length a);
-    Array.iter a ~f:(Iobuf.Fill.int64_t_le buf)
+    fill_each a ~f:(fun n -> Iobuf.Fill.int64_t_le buf n)
   | Floats a ->
     fill_vec_head buf Tag.f64 (Array.length a);
-    Array.iter a ~f:(fun f -> Iobuf.Fill.int64_t_le buf (Int64.bits_of_float f))
+    fill_each a ~f:(fun f -> Iobuf.Fill.int64_t_le buf (Int64.bits_of_float f))
   | Syms a -> fill_syms buf a
   | Strings a ->
     fill_vec_head buf Tag.str (Array.length a);
-    Array.iter a ~f:(fun s ->
+    fill_each a ~f:(fun s ->
       Iobuf.Fill.int64_le buf (String.length s);
       Iobuf.Fill.stringo buf s)
+  | Col c ->
+    fill_vec_head buf (Column.tag c) (Column.length c);
+    Column.fill buf c
   | List a ->
     fill_vec_head buf Tag.list (Array.length a);
-    Array.iter a ~f:(fill buf)
+    fill_each a ~f:(fill buf)
   | Table cols ->
     fill_tag buf Tag.table;
     Iobuf.Fill.uint8_trunc buf 0;
     fill_syms ~attrs:sym_w64 buf (Array.map cols ~f:(fun c -> c.name));
     fill_vec_head buf Tag.list (Array.length cols);
-    Array.iter cols ~f:(fun c -> fill buf c.data)
+    fill_each cols ~f:(fun c -> fill buf c.data)
   | Dict (k, v) ->
     fill_tag buf Tag.dict;
     Iobuf.Fill.uint8_trunc buf 0;

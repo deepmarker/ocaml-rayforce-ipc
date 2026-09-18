@@ -8,6 +8,9 @@ open! Core
     array straight into the frame, so the only copy between a producer's
     accumulator and the socket is the one it makes itself.
 
+    The array constructors are the convenient way to write a value; {!Col}
+    is the way to build one a row at a time without allocating.
+
     Columns are always written without the HAS_NULLS attribute. Rayforce
     encodes nulls as per-type sentinels in the payload, so a null column
     value is a sentinel this library does not interpret. *)
@@ -31,6 +34,9 @@ type t =
   | Timestamps of int64 array
   | Syms of Sym.t array
   | Strings of string array
+  | Col of Column.t
+  (** A column built row by row, already in wire layout. What a producer
+          should use: see {!Column}. *)
   | List of t array
   | Table of column array
   | Dict of t * t

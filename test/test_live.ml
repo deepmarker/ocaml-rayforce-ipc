@@ -28,9 +28,10 @@ let depth_batch () =
     [ ( "ts_evt"
       , Value.Timestamps
           (Array.init rows ~f:(fun i ->
-             Timestamp.of_time_ns
-               (Time_ns.of_string_with_utc_offset (sprintf "2026-09-18 12:00:0%d.5Z" i))))
-      )
+             Int64.of_int
+               (Timestamp.of_time_ns
+                  (Time_ns.of_string_with_utc_offset
+                     (sprintf "2026-09-18 12:00:0%d.5Z" i))))) )
     ; ( "instrument"
       , Value.Syms
           (Array.map [| "BTCUSDT"; "ETHUSDT"; "BTCUSDT"; "SOLUSDT" |] ~f:Sym.intern) )
