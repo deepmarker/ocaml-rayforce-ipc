@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Starts a throwaway `rayforce -p <port>` server, waits for it to accept
-# connections, runs test_live.exe against it, and tears the server down --
+# connections, runs each client's live test against it, and tears the
+# server down --
 # regardless of whether the test passes. Invoked from dune's runtest alias
 # (see test/dune); not meant to be run by hand, though it's harmless to.
 set -u
@@ -11,7 +12,8 @@ if ! command -v rayforce >/dev/null 2>&1; then
   exit 1
 fi
 
-test_exe=$1
+# Both clients -- blocking and Async -- run against the same server.
+test_exes=("$@")
 
 # Pid-derived port to keep parallel dune-cache/CI runs from colliding on a
 # fixed port; still not collision-proof against an unrelated listener, but
@@ -41,4 +43,8 @@ until (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; do
 done
 exec 3<&-
 
-"$test_exe" "$port"
+status=0
+for exe in "${test_exes[@]}"; do
+  "$exe" "$port" || status=$?
+done
+exit "$status"

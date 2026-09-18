@@ -12,6 +12,13 @@
   (pps ppx_jane))
  (libraries core rayforce-ipc alcotest))
 
+(executable
+ (name test_live_async)
+ (modules test_live_async)
+ (preprocess
+  (pps ppx_jane))
+ (libraries core async rayforce-ipc rayforce-ipc-async alcotest))
+
 ; The wire format is only worth anything if the other end agrees. This runs
 ; the client against a real `rayforce -p <port>`: run_live_test.sh starts
 ; one, waits for the listener, runs the test and always tears it down --
@@ -19,6 +26,6 @@
 
 (rule
  (alias runtest)
- (deps run_live_test.sh %{exe:test_live.exe})
+ (deps run_live_test.sh %{exe:test_live.exe} %{exe:test_live_async.exe})
  (action
-  (run bash run_live_test.sh %{exe:test_live.exe})))
+  (run bash run_live_test.sh %{exe:test_live.exe} %{exe:test_live_async.exe})))

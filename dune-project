@@ -27,3 +27,17 @@
   core_kernel
   core_unix
   (alcotest :with-test)))
+
+(package
+ (name rayforce-ipc-async)
+ (synopsis "Rayforce IPC on the Async scheduler")
+ (description
+  "An Async client for RayforceDB's IPC protocol, over the encoder in rayforce-ipc. A send costs a copy into the writer's buffer rather than a blocking write, so a server that is slow to drain backs up in that buffer instead of stalling the caller; and the connection satisfies Persistent_connection_kernel.Closable, so a link that must survive the server restarting can be handed to Persistent_connection.")
+ (depends
+  (ocaml
+   (>= 4.14.0))
+  core
+  core_kernel
+  async
+  rayforce-ipc
+  (alcotest :with-test)))

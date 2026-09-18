@@ -25,6 +25,7 @@ Rayforce_ipc.Conn.send_async conn (List [| Sym (Sym.intern "upd"); Sym (Sym.inte
 | `Value` | The value model, sized and filled straight into an `Iobuf`. A column is an ordinary OCaml array. |
 | `Wire` | The 16-byte frame header, and the delta+RLE decoder for a compressed frame. |
 | `Conn` | A blocking client: connect, handshake, `send_async`, `send_sync`. |
+| `Rayforce_ipc_async.Conn` | The same, on the Async scheduler (package `rayforce-ipc-async`). A send hands the frame to the writer and returns, so a slow server backs up in a buffer rather than stalling the caller; and it satisfies `Persistent_connection_kernel.Closable`. |
 | `Timestamp` | The 2000-01-01 epoch the format counts nanoseconds from. |
 
 ## The format
@@ -51,6 +52,14 @@ Wire version 3, as of rayforce v2.7. The authority is
 
 A wire-version bump is a connect-time error here, not a silent
 misparse — the handshake compares versions before anything is sent.
+
+## Which client
+
+`rayforce-ipc-async` in any program that already runs Async, which is the
+one to reach for: a blocking write to a server that has stopped draining
+stalls whatever thread called it, and in a feed that means the ingest
+loop. The blocking `Conn` stays for programs with no scheduler. Both speak
+the same format and share the encoder.
 
 ## Tests
 
