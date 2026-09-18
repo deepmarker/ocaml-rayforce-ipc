@@ -116,13 +116,18 @@ let sexp_of_t t =
    what the format costs -- the string of every cell. *)
 let wire_size t = if t.tag <> Tag.sym then t.len * t.width else t.sym_bytes
 
+(* The loop reads its own cells rather than going through [get_int]: the
+   index cannot be out of range here, and the bounds check it repeats --
+   once for the buffer, once for the symbol id, once for the name -- was
+   measurable on a feed writing millions of cells. One [Fill.string] per
+   cell, with no optional arguments to apply through. *)
 let fill buf t =
   if t.tag <> Tag.sym
   then Iobuf.Fill.bigstring buf t.buf ~str_pos:0 ~len:(t.len * t.width)
   else
     for i = 0 to t.len - 1 do
-      let s = Sym.to_string (Sym.of_int_exn (get_int t i)) in
-      Iobuf.Fill.stringo buf s;
-      Iobuf.Fill.char buf '\000'
+      let id = Bigstring.unsafe_get_int64_le_exn t.buf ~pos:(i * t.width) in
+      let s = Sym.wire (Sym.unsafe_of_int id) in
+      Iobuf.Fill.string buf s ~str_pos:0 ~len:(String.length s)
     done
 ;;

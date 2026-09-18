@@ -150,11 +150,6 @@ let fill_vec_head ?(attrs = 0) buf tag len =
   Iobuf.Fill.int64_le buf len
 ;;
 
-let fill_cstring buf s =
-  Iobuf.Fill.stringo buf s;
-  Iobuf.Fill.char buf '\000'
-;;
-
 (* Every loop below iterates by index rather than through [Array.iter]: the
    closure it would take is called once per row and is not inlined, which a
    column's worth of rows makes worth avoiding. *)
@@ -164,9 +159,14 @@ let fill_each a ~f =
   done
 ;;
 
+let fill_sym buf s =
+  let bytes = Sym.wire s in
+  Iobuf.Fill.string buf bytes ~str_pos:0 ~len:(String.length bytes)
+;;
+
 let fill_syms ?attrs buf a =
   fill_vec_head ?attrs buf Tag.sym (Array.length a);
-  fill_each a ~f:(fun s -> fill_cstring buf (Sym.to_string s))
+  fill_each a ~f:(fill_sym buf)
 ;;
 
 let rec fill buf t =
@@ -202,7 +202,7 @@ let rec fill buf t =
     Iobuf.Fill.int64_t_le buf (Int64.bits_of_float f)
   | Sym s ->
     fill_atom_head buf Tag.sym;
-    fill_cstring buf (Sym.to_string s)
+    fill_sym buf s
   | String s ->
     fill_atom_head buf Tag.str;
     Iobuf.Fill.int64_le buf (String.length s);

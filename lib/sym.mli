@@ -21,13 +21,21 @@ val intern : string -> t
     ids are dense and only {!intern} hands them out. *)
 val of_int_exn : int -> t
 
+(**/**)
+
+(* For the serializer, on a column it filled itself: the id came out of
+   that column and is not in question. *)
+val unsafe_of_int : int -> t
 val to_string : t -> string
 val to_int : t -> int
 
-(** Bytes this symbol occupies on the wire: its length plus the NUL. Cached
-    at intern time, so sizing a column is a read per row rather than a
-    string fetch per row. *)
+(** Bytes this symbol occupies on the wire: its name plus the NUL. Both are
+    worked out at intern time, so sizing a column is a read per row and
+    writing a cell is one blit. *)
 val wire_len : t -> int
+
+(** The bytes themselves, terminator included. *)
+val wire : t -> string
 
 include Comparable.S_plain with type t := t
 include Hashable.S_plain with type t := t
