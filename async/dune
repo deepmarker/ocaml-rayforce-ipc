@@ -3,4 +3,4 @@
  (public_name rayforce-ipc-async)
  (preprocess
   (pps ppx_jane))
- (libraries core core_kernel.iobuf async rayforce-ipc))
+ (libraries core core_kernel.iobuf async core_unix rayforce-ipc))

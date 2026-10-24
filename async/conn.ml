@@ -3,7 +3,8 @@ open! Async
 open! Rayforce_ipc
 
 type t =
-  { reader : Reader.t
+  { socket : ([ `Active ], Socket.Address.Inet.t) Socket.t
+  ; reader : Reader.t
   ; writer : Writer.t
   ; (* Frames are handed to the writer rather than copied into it, so a
        buffer stays spoken for until the writer says it is done with it and
@@ -14,7 +15,14 @@ type t =
   }
 
 let initial_buf = 64 * 1024
-let close t = Writer.close t.writer >>= fun () -> Reader.close t.reader
+
+let close_with ?force_close t =
+  Monitor.protect
+    (fun () -> Writer.close ?force_close t.writer)
+    ~finally:(fun () -> Reader.close t.reader)
+;;
+
+let close t = close_with t
 let is_closed t = Writer.is_closed t.writer || Reader.is_closed t.reader
 
 let close_finished t =
@@ -22,6 +30,27 @@ let close_finished t =
 ;;
 
 let bytes_to_write t = Writer.bytes_to_write t.writer
+
+(* Async owns the socket and keeps this syscall nonblocking. Urgent data must
+   bypass the normal Writer queue so the engine can see it while evaluating. *)
+let send_cancel_byte fd =
+  Core_unix.send_substring fd ~buf:"!" ~pos:0 ~len:1 ~mode:[ MSG_OOB ]
+;;
+
+let cancel_and_close t =
+  let sent =
+    if is_closed t
+    then Ok ()
+    else (
+      match Fd.syscall ~nonblocking:true (Socket.fd t.socket) send_cancel_byte with
+      | `Ok 1 -> Ok ()
+      | `Ok n -> Or_error.errorf "rayforce: sent %d urgent bytes, expected one" n
+      | `Already_closed -> Ok ()
+      | `Error exn -> Or_error.of_exn exn)
+  in
+  Monitor.try_with_or_error (fun () -> close_with ~force_close:Deferred.unit t)
+  >>| fun closed -> Or_error.combine_errors_unit [ sent; closed ]
+;;
 
 (* ===== Frames ===== *)
 
@@ -155,7 +184,12 @@ let connect ?user ?password ?(timeout = Time_ns.Span.of_int_sec 5) ~host ~port (
   >>=? fun (socket, reader, writer) ->
   Socket.setopt socket Socket.Opt.nodelay true;
   let t =
-    { reader; writer; free = []; sync = Sequencer.create ~continue_on_error:true () }
+    { socket
+    ; reader
+    ; writer
+    ; free = []
+    ; sync = Sequencer.create ~continue_on_error:true ()
+    }
   in
   (* The handshake gets the same budget as the connect: a server that
      accepts and then says nothing must not hold a client forever. *)

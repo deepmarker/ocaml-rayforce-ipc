@@ -30,6 +30,15 @@ val connect
   -> t Deferred.Or_error.t
 
 val close : t -> unit Deferred.t
+
+(** Best-effort POSIX engine query cancellation followed by connection teardown.
+    Sends one TCP urgent byte through Async's nonblocking descriptor API, then
+    closes even if sending fails, discarding unsent buffered output.
+    Success confirms acceptance by the local socket,
+    not that server execution stopped. Never reuse this connection: native frames
+    have no request IDs. Calls after closure are harmless. *)
+val cancel_and_close : t -> unit Deferred.Or_error.t
+
 val is_closed : t -> bool
 val close_finished : t -> unit Deferred.t
 

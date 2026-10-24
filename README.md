@@ -88,3 +88,24 @@ The temporal tests cover raw atoms/vectors, empty and nullable columns,
 nanosecond precision above 2^53, Core conversion limits and both overflow
 regressions. The live tests verify timespan values against a real engine
 through both blocking and Async clients.
+
+## Async query cancellation
+
+`Rayforce_ipc_async.Conn.cancel_and_close` sends Rayforce's POSIX TCP urgent
+cancel byte and tears down the connection, discarding unsent buffered output.
+The urgent send runs through Async's managed nonblocking file-descriptor API;
+ordinary connections, I/O and cleanup remain on Async. A failed send is
+returned as an error but does not skip cleanup. Repeated calls after closure
+are harmless. The blocking client API is unchanged.
+
+Cancellation is best effort: socket acceptance of the byte does not acknowledge
+server interruption, and the engine's urgent-data mechanism is POSIX-specific.
+The connection is deliberately not reusable: reply frames have no request IDs,
+and neither a late reply nor a queued urgent byte may affect a subsequent call.
+Reconnect for later work. Closing alone does not guarantee engine interruption.
+
+The dedicated Async live test starts a query that writes a readiness marker
+and loops indefinitely, cancels it, and verifies that another connection then
+gets a prompt result. It also checks idle-connection isolation, idempotent
+teardown and cancellation with buffered output. The workbench separately
+checks urgent-byte delivery for user cancellation and request deadlines.

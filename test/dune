@@ -26,11 +26,25 @@
 
 (rule
  (alias runtest)
- (deps run_live_test.sh %{exe:test_live.exe} %{exe:test_live_async.exe})
+ (deps
+  run_live_test.sh
+  %{exe:test_live.exe}
+  %{exe:test_live_async.exe}
+  %{exe:test_live_cancel_async.exe})
  (action
-  (run bash run_live_test.sh %{exe:test_live.exe} %{exe:test_live_async.exe})))
+  (run
+   bash
+   run_live_test.sh
+   %{exe:test_live.exe}
+   %{exe:test_live_async.exe}
+   %{exe:test_live_cancel_async.exe})))
 
 (test
  (name test_temporal)
  (modules test_temporal)
  (libraries core rayforce-ipc))
+
+(executable
+ (name test_live_cancel_async)
+ (modules test_live_cancel_async)
+ (libraries core async rayforce-ipc rayforce-ipc-async))
