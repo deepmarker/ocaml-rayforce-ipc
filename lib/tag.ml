@@ -13,6 +13,7 @@ let i64 = 5
 let f64 = 7
 let date = 8
 let timestamp = 10
+let timespan = 16
 let sym = 12
 let str = 13
 let table = 98

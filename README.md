@@ -26,7 +26,8 @@ Rayforce_ipc.Conn.send_async conn (List [| Sym (Sym.intern "upd"); Sym (Sym.inte
 | `Wire` | The 16-byte frame header, and the delta+RLE decoder for a compressed frame. |
 | `Conn` | A blocking client: connect, handshake, `send_async`, `send_sync`. |
 | `Rayforce_ipc_async.Conn` | The same, on the Async scheduler (package `rayforce-ipc-async`). A send hands the frame to the writer and returns, so a slow server backs up in a buffer rather than stalling the caller; and it satisfies `Persistent_connection_kernel.Closable`. |
-| `Timestamp` | The 2000-01-01 epoch the format counts nanoseconds from. |
+| `Timestamp` | Checked conversion between Core Unix time and Rayforce's 2000-01-01 epoch. |
+| `Timespan` | Checked conversion between signed int64 nanoseconds and Core `Time_ns.Span`. |
 
 ## The format
 
@@ -66,3 +67,24 @@ the same format and share the encoder.
 `dune runtest` runs the round-trip tests, and then the one that matters:
 `test_live.ml` against a real `rayforce -p <port>`, reading every encoded
 value back through rayforce's own evaluator. It needs `rayforce` on PATH.
+
+## Exact timestamps and timespans
+
+`Value.Timespan` and `Value.Timespans` carry signed int64 nanoseconds using
+Rayforce tag 16. `Column.timespan` supports the reusable column-builder path
+with `Column.add_int64`. No epoch offset is applied to spans. Raw values retain
+the entire engine range; `INT64_MIN` denotes null.
+
+Use `Timestamp.of_time_ns_int64` and `Timestamp.to_time_ns_int64` when bridging
+Core time and wire timestamps. The checked constructor returns an error for
+null or values outside Core's signed 63-bit range. `Timespan.of_span` and
+`Timespan.to_span` do the equivalent span conversion without an epoch offset.
+No floating-point conversion is involved. The existing int timestamp helpers
+remain available but now raise rather than wrap for an unrepresentable value.
+Contemporary timestamps are unchanged; historical Core times can have a
+Rayforce epoch offset too negative for an OCaml int.
+
+The temporal tests cover raw atoms/vectors, empty and nullable columns,
+nanosecond precision above 2^53, Core conversion limits and both overflow
+regressions. The live tests verify timespan values against a real engine
+through both blocking and Async clients.

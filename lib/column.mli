@@ -17,6 +17,9 @@ type t [@@deriving sexp_of]
 val i64 : ?capacity:int -> unit -> t
 val f64 : ?capacity:int -> unit -> t
 
+(** Signed nanoseconds; append with [add_int64]. *)
+val timespan : ?capacity:int -> unit -> t
+
 (** Nanoseconds since 2000-01-01, see {!Timestamp}. *)
 val timestamp : ?capacity:int -> unit -> t
 

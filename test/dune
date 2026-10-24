@@ -29,3 +29,8 @@
  (deps run_live_test.sh %{exe:test_live.exe} %{exe:test_live_async.exe})
  (action
   (run bash run_live_test.sh %{exe:test_live.exe} %{exe:test_live_async.exe})))
+
+(test
+ (name test_temporal)
+ (modules test_temporal)
+ (libraries core rayforce-ipc))

@@ -23,6 +23,7 @@ type t =
   | Int32 of int
   | Int of int64
   | Float of float
+  | Timespan of int64 (** signed nanoseconds; see {!Timespan} *)
   | Timestamp of int64 (** nanoseconds since 2000-01-01, see {!Timestamp} *)
   | Date of int (** days since 2000-01-01 *)
   | Sym of Sym.t
@@ -31,6 +32,7 @@ type t =
   | Bytes of Bigstring.t
   | Ints of int64 array
   | Floats of float array
+  | Timespans of int64 array (** INT64_MIN entries represent null. *)
   | Timestamps of int64 array
   | Syms of Sym.t array
   | Strings of string array

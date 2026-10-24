@@ -88,6 +88,13 @@ let main port =
          "(as 'STR (first (get (at last_upd 2) 'ts_evt)))"
          (Value.String "2026.09.18D12:00:00.500000000")
        >>= fun () ->
+       check_eval conn "1D" (Value.Timespan 86400000000000L)
+       >>= fun () ->
+       check_eval
+         conn
+         "(enlist 0D00:00:00.000000001 -0D00:00:00.000000001)"
+         (Value.Timespans [| 1L; -1L |])
+       >>= fun () ->
        (* A batch well past the frame's compression threshold, written
          without the caller ever blocking on the socket. *)
        let big = Column.i64 () in

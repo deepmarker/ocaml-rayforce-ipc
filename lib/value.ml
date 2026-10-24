@@ -14,6 +14,7 @@ type t =
   | Int32 of int
   | Int of int64
   | Float of float
+  | Timespan of int64
   | Timestamp of int64
   | Date of int
   | Sym of Sym.t
@@ -22,6 +23,7 @@ type t =
   | Bytes of Bigstring.t
   | Ints of int64 array
   | Floats of float array
+  | Timespans of int64 array
   | Timestamps of int64 array
   | Syms of Sym.t array
   | Strings of string array
@@ -44,7 +46,7 @@ let fail fmt = Printf.ksprintf (fun s -> raise (Protocol_error s)) fmt
 let rec length = function
   | Bools a -> Array.length a
   | Bytes b -> Bigstring.length b
-  | Ints a | Timestamps a -> Array.length a
+  | Ints a | Timestamps a | Timespans a -> Array.length a
   | Floats a -> Array.length a
   | Syms a -> Array.length a
   | Strings a -> Array.length a
@@ -117,12 +119,12 @@ let rec size = function
   | Bool _ | Byte _ -> atom 1
   | Short _ -> atom 2
   | Int32 _ | Date _ -> atom 4
-  | Int _ | Float _ | Timestamp _ -> atom 8
+  | Int _ | Float _ | Timestamp _ | Timespan _ -> atom 8
   | Sym s -> atom (cstring (Sym.to_string s))
   | String s -> atom (8 + String.length s)
   | Bools a -> vec (Array.length a)
   | Bytes b -> vec (Bigstring.length b)
-  | Ints a | Timestamps a -> vec (Array.length a * 8)
+  | Ints a | Timestamps a | Timespans a -> vec (Array.length a * 8)
   | Floats a -> vec (Array.length a * 8)
   | Syms a -> vec (sym_bytes a)
   | Strings a -> vec (sum_by a ~f:(fun s -> 8 + String.length s))
@@ -194,6 +196,9 @@ let rec fill buf t =
   | Int n ->
     fill_atom_head buf Tag.i64;
     Iobuf.Fill.int64_t_le buf n
+  | Timespan n ->
+    fill_atom_head buf Tag.timespan;
+    Iobuf.Fill.int64_t_le buf n
   | Timestamp n ->
     fill_atom_head buf Tag.timestamp;
     Iobuf.Fill.int64_t_le buf n
@@ -215,6 +220,9 @@ let rec fill buf t =
     Iobuf.Fill.bigstringo buf b
   | Ints a ->
     fill_vec_head buf Tag.i64 (Array.length a);
+    fill_each a ~f:(fun n -> Iobuf.Fill.int64_t_le buf n)
+  | Timespans a ->
+    fill_vec_head buf Tag.timespan (Array.length a);
     fill_each a ~f:(fun n -> Iobuf.Fill.int64_t_le buf n)
   | Timestamps a ->
     fill_vec_head buf Tag.timestamp (Array.length a);
@@ -308,6 +316,7 @@ and consume_atom buf ~tag =
   | t when t = Tag.i32 -> Int32 (Iobuf.Consume.int32_le buf)
   | t when t = Tag.date -> Date (Iobuf.Consume.int32_le buf)
   | t when t = Tag.i64 -> Int (Iobuf.Consume.int64_t_le buf)
+  | t when t = Tag.timespan -> Timespan (Iobuf.Consume.int64_t_le buf)
   | t when t = Tag.timestamp -> Timestamp (Iobuf.Consume.int64_t_le buf)
   | t when t = Tag.f64 -> Float (consume_float buf)
   | t when t = Tag.sym -> Sym (Sym.intern (consume_cstring buf))
@@ -360,6 +369,8 @@ and consume_vec buf ~tag =
      | t when t = Tag.u8 -> Bytes (Iobuf.Consume.bigstringo buf ~len)
      | t when t = Tag.i64 ->
        Ints (init_in_order len ~f:(fun () -> Iobuf.Consume.int64_t_le buf))
+     | t when t = Tag.timespan ->
+       Timespans (init_in_order len ~f:(fun () -> Iobuf.Consume.int64_t_le buf))
      | t when t = Tag.timestamp ->
        Timestamps (init_in_order len ~f:(fun () -> Iobuf.Consume.int64_t_le buf))
      | t when t = Tag.f64 -> Floats (init_in_order len ~f:(fun () -> consume_float buf))

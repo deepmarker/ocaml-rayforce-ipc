@@ -16,6 +16,7 @@ let create ?(capacity = 1024) ~width ~tag () =
 
 let i64 ?capacity () = create ?capacity ~width:8 ~tag:Tag.i64 ()
 let f64 ?capacity () = create ?capacity ~width:8 ~tag:Tag.f64 ()
+let timespan ?capacity () = create ?capacity ~width:8 ~tag:Tag.timespan ()
 let timestamp ?capacity () = create ?capacity ~width:8 ~tag:Tag.timestamp ()
 let bool ?capacity () = create ?capacity ~width:1 ~tag:Tag.bool ()
 let sym ?capacity () = create ?capacity ~width:8 ~tag:Tag.sym ()
@@ -102,6 +103,8 @@ let sexp_of_t t =
     | tag when tag = Tag.bool -> "Bools", fun i -> [%sexp (get_bool t i : bool)]
     | tag when tag = Tag.sym ->
       "Syms", fun i -> [%sexp (Sym.to_string (get_sym t i) : string)]
+    | tag when tag = Tag.timespan ->
+      "Timespans", fun i -> [%sexp (get_int64 t i : Int64.t)]
     | tag when tag = Tag.timestamp ->
       "Timestamps", fun i -> [%sexp (get_int64 t i : Int64.t)]
     | _ -> "Ints", fun i -> [%sexp (get_int64 t i : Int64.t)]

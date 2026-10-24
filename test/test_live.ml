@@ -92,6 +92,50 @@ let main port =
         conn
         "(as 'STR (first (get (at last_upd 2) 'ts_evt)))"
         (Value.String "2026.09.18D12:00:00.500000000");
+      (* Timespan atoms, vectors, null sentinels and column builders through
+         the engine's evaluator and serializer, not just our own decoder. *)
+      check_eval conn "0D00:00:00.000000001" (Value.Timespan 1L);
+      check_eval conn "-0D00:00:00.000000001" (Value.Timespan (-1L));
+      check_eval conn "1D" (Value.Timespan 86400000000000L);
+      check_eval conn "(do (set temporal_echo (fn [x] x)) null)" Value.Null;
+      (Conn.send_sync
+         conn
+         (Value.List [| sym "temporal_echo"; Value.Timespan 9007199254740993L |])
+       |> fun got ->
+       Alcotest.(check string)
+         "timespan precision"
+         "(Timespan 9007199254740993)"
+         (Sexp.to_string (Value.sexp_of_t got)));
+      let spans = [| 0L; -1L; 86400000000000L; 9007199254740993L; Int64.min_value |] in
+      let got =
+        Conn.send_sync conn (Value.List [| sym "temporal_echo"; Value.Timespans spans |])
+      in
+      (match got with
+       | Value.Timespans got -> Alcotest.(check (array int64)) "timespan vector" spans got
+       | _ -> failwith "timespan vector type");
+      let null =
+        Conn.send_sync conn (Value.List [| sym "nil?"; Value.Timespan Int64.min_value |])
+      in
+      (match null with
+       | Value.Bool true -> ()
+       | _ -> failwith "timespan atom null");
+      let empty =
+        Conn.send_sync conn (Value.List [| sym "temporal_echo"; Value.Timespans [||] |])
+      in
+      (match empty with
+       | Value.Timespans a when Array.is_empty a -> ()
+       | _ -> failwith "empty timespan vector");
+      let col = Column.timespan () in
+      Array.iter spans ~f:(Column.add_int64 col);
+      let got =
+        Conn.send_sync
+          conn
+          (Value.List [| sym "temporal_echo"; Value.table [ "span", Value.Col col ] |])
+      in
+      (match Value.column got "span" with
+       | Some (Value.Timespans got) ->
+         Alcotest.(check (array int64)) "timespan column" spans got
+       | _ -> failwith "timespan column type");
       (* A batch past the 2000-byte compression threshold, to prove the
          size headroom and that nothing in the frame depends on being
          small. *)
