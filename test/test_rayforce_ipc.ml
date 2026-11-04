@@ -48,11 +48,31 @@ let test_atoms () =
   check_same "timestamp" (Value.Timestamp 123L);
   check_same "sym" (sym "upd");
   check_same "string" (Value.String "(+ 1 2)");
-  check_same "error" (Value.Error "domain")
+  check_same "error" (Value.Error "domain");
+  check_same "float32 bits" (Value.Float32 0x7fc01234l);
+  check_same "time" (Value.Time 1234);
+  check_same "guid" (Value.Guid "0123456789abcdef");
+  check_same "typed null flags" (Value.Atom_flags (1, Value.Bool false));
+  check_same "quoted symbol" (Value.Atom_flags (32, sym "hello"));
+  check_same
+    "lambda"
+    (Value.Lambda
+       ( Value.List [||]
+       , Value.Int 42L
+       , Some (Value.Dict (Value.Syms [||], Value.List [||])) ));
+  check_same "unary" (Value.Unary "long_builtin_name");
+  check_same "binary" (Value.Binary "+");
+  check_same "variadic" (Value.Variadic "list")
 ;;
 
 let test_vectors () =
   check_same "bools" (Value.Bools [| true; false; true |]);
+  check_same "shorts" (Value.Shorts [| -32768; 32767 |]);
+  check_same "int32s" (Value.Int32s [| -2147483648; 2147483647 |]);
+  check_same "dates" (Value.Dates [| 0; -1 |]);
+  check_same "times" (Value.Times [| 0; 1234 |]);
+  check_same "float32s" (Value.Float32s [| 0l; 0x7fc01234l; Int32.min_value |]);
+  check_same "guids" (Value.Guids [| "0123456789abcdef"; "fedcba9876543210" |]);
   check_same "ints" (Value.Ints [| 0L; -1L; Int64.max_value |]);
   check_same "floats" (Value.Floats [| 0.; -1.25; Float.max_value |]);
   check_same "timestamps" (Value.Timestamps [| 0L; 1L |]);

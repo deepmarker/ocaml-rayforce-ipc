@@ -136,6 +136,31 @@ let main port =
        | Some (Value.Timespans got) ->
          Alcotest.(check (array int64)) "timespan column" spans got
        | _ -> failwith "timespan column type");
+      (* The server deserializes these values from the async message and
+         serializes them again in the synchronous reply. *)
+      let extra =
+        Value.table
+          [ "short", Value.Shorts [| -7; 12 |]
+          ; "i32", Value.Int32s [| -42; 123456 |]
+          ; "date", Value.Dates [| 0; 1 |]
+          ; "time", Value.Times [| 0; 1234 |]
+          ; "f32", Value.Float32s [| 0x3f800000l; 0x40000000l |]
+          ; "guid", Value.Guids [| "0123456789abcdef"; "fedcba9876543210" |]
+          ]
+      in
+      Conn.send_async conn extra;
+      check_eval conn "last_upd" extra;
+      check_eval conn "0Nl" (Value.Atom_flags (1, Value.Int Int64.min_value));
+      let check_function expr =
+        let value = eval conn expr in
+        (match value with
+         | Value.Lambda _ | Value.Unary _ | Value.Binary _ | Value.Variadic _ -> ()
+         | _ -> failwith "function response");
+        Conn.send_async conn value;
+        check_eval conn "last_upd" value
+      in
+      check_function "(fn [x] x)";
+      check_function "+";
       (* A batch past the 2000-byte compression threshold, to prove the
          size headroom and that nothing in the frame depends on being
          small. *)

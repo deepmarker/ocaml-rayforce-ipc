@@ -109,3 +109,16 @@ and loops indefinitely, cancels it, and verifies that another connection then
 gets a prompt result. It also checks idle-connection isolation, idempotent
 teardown and cancellation with buffered output. The workbench separately
 checks urgent-byte delivery for user cancellation and request deadlines.
+
+## Protocol value coverage
+
+The client supports Rayforce's serializable primitive atoms and vectors,
+including i16, i32, date, time, f32 and GUID, as well as lists, tables,
+dictionaries, lambdas and named builtins. `Float32` and `Float32s` hold raw
+IEEE-754 bits; GUIDs hold exactly 16 bytes each. `Atom_flags (flags, value)`
+preserves atom flags, including the typed-null bit and quoted-symbol bit;
+ordinary atoms with zero flags retain their original constructors. Sending a
+flagged atom asks Rayforce to apply its own typed-null semantics, which can
+canonicalize the payload. Vector nulls use the engine's per-type sentinels.
+The client uses TCP and does not negotiate shared-memory or RDMA transports.
+Index objects are not serializable by Rayforce and are not supported here.

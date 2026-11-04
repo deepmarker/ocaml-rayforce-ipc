@@ -17,12 +17,17 @@ open! Core
 
 type t =
   | Null
+  | Atom_flags of int * t
+  (** Atom wire flags, including typed-null bit 0 and quoted-symbol bit 5. *)
   | Bool of bool
   | Byte of int
   | Short of int
   | Int32 of int
   | Int of int64
   | Float of float
+  | Float32 of int32 (** IEEE-754 binary32 bits. *)
+  | Time of int
+  | Guid of string (** Exactly 16 raw bytes. *)
   | Timespan of int64 (** signed nanoseconds; see {!Timespan} *)
   | Timestamp of int64 (** nanoseconds since 2000-01-01, see {!Timestamp} *)
   | Date of int (** days since 2000-01-01 *)
@@ -30,6 +35,12 @@ type t =
   | String of string
   | Bools of bool array
   | Bytes of Bigstring.t
+  | Shorts of int array
+  | Int32s of int array
+  | Dates of int array
+  | Times of int array
+  | Float32s of int32 array
+  | Guids of string array
   | Ints of int64 array
   | Floats of float array
   | Timespans of int64 array (** INT64_MIN entries represent null. *)
@@ -42,6 +53,10 @@ type t =
   | List of t array
   | Table of column array
   | Dict of t * t
+  | Lambda of t * t * t option
+  | Unary of string
+  | Binary of string
+  | Variadic of string
   | Error of string (** a rayforce error code, at most 7 ASCII bytes *)
 
 and column =
@@ -63,8 +78,7 @@ val size : t -> int
 val fill : (read_write, Iobuf.seek) Iobuf.t -> t -> unit
 
 (** Read one value, advancing past it. Raises {!Protocol_error} on anything
-    malformed or on a type this library does not decode (lambdas, builtins,
-    guids and the narrow-index sym encodings a server never sends). *)
+    malformed or on a type Rayforce does not serialize (such as an index). *)
 val consume : ([> read ], Iobuf.seek) Iobuf.t -> t
 
 (** [table [ name, col; ... ]] in column order. Raises if the columns differ

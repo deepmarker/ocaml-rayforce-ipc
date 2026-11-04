@@ -28,6 +28,7 @@ let store = ref (Array.create ~len:64 { name = ""; wire = "\000"; wire_len = 1 }
 let count = ref 0
 
 let intern s =
+  if String.contains s '\000' then invalid_arg "symbol contains NUL";
   Hashtbl.find_or_add ids s ~default:(fun () ->
     let id = !count in
     if id >= Array.length !store
