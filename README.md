@@ -31,10 +31,12 @@ Rayforce_ipc.Conn.send_async conn (List [| Sym (Sym.intern "upd"); Sym (Sym.inte
 
 ## The format
 
-Wire version 3, as of rayforce v2.7. The authority is
+Wire version 4, as of rayforce v3.0.2. Version 4 adds the error message to an
+error record (code, one length byte, message); a peer on version 3 is refused
+at the handshake, as the server itself refuses it. The authority is
 `src/store/serde.{h,c}` and `src/core/ipc.{h,c}` in the rayforce tree.
 
-- **Handshake** — the client sends `{3, 0}`; the server answers
+- **Handshake** — the client sends `{4, 0}`; the server answers
   `{version, auth_required}`, and if it asked for credentials, one length
   byte plus `user:password\0` and a one-byte verdict.
 - **Frame** — `prefix 0xcefadefa`, version, flags, endian, message type,

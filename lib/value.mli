@@ -57,7 +57,10 @@ type t =
   | Unary of string
   | Binary of string
   | Variadic of string
-  | Error of string (** a rayforce error code, at most 7 ASCII bytes *)
+  | Error of
+      { code : string (** a rayforce error code, at most 7 ASCII bytes *)
+      ; message : string (** the diagnostic text, at most 255 bytes; may be empty *)
+      }
 
 and column =
   { name : Sym.t

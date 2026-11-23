@@ -29,7 +29,7 @@ type header =
 [@@deriving sexp_of]
 
 let prefix = 0xcefadefa
-let wire_version = 3
+let wire_version = 4
 let header_len = 16
 let max_payload = 256 * 1024 * 1024
 let flag_compressed = 0x01

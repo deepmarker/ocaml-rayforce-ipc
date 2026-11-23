@@ -45,7 +45,10 @@ type t =
   | Unary of string
   | Binary of string
   | Variadic of string
-  | Error of string
+  | Error of
+      { code : string
+      ; message : string
+      }
 
 and column =
   { name : Sym.t
@@ -56,6 +59,9 @@ and column =
 exception Protocol_error of string
 
 let fail fmt = Printf.ksprintf (fun s -> raise (Protocol_error s)) fmt
+
+(* An error record's message is length-prefixed by one byte. *)
+let error_message_len message = Int.min (String.length message) 255
 
 let rec length = function
   | Bools a -> Array.length a
@@ -133,7 +139,7 @@ let sym_bytes a = sum_by a ~f:Sym.wire_len
 let rec size = function
   | Null -> 1
   | Atom_flags (_, v) -> size v
-  | Error _ -> 1 + 8
+  | Error { code = _; message } -> 1 + 8 + 1 + error_message_len message
   | Bool _ | Byte _ -> atom 1
   | Short _ -> atom 2
   | Guid _ -> atom 16
@@ -211,10 +217,14 @@ let rec fill buf t =
     let (_ : int) = Iobuf.Consume.uint8 temp in
     Iobuf.Fill.uint8_trunc buf flags;
     Iobuf.Fill.stringo buf (Iobuf.Consume.stringo temp ~len:(Iobuf.length temp))
-  | Error code ->
+  | Error { code; message } ->
     fill_tag buf Tag.error;
-    (* The code is 8 bytes of packed ASCII, NUL-padded. *)
-    Iobuf.Fill.tail_padded_fixed_string ~padding:'\000' ~len:8 buf code
+    (* The code is 8 bytes of packed ASCII, NUL-padded; the message is one
+       length byte and that many bytes, cut at 255 as rayforce cuts it. *)
+    Iobuf.Fill.tail_padded_fixed_string ~padding:'\000' ~len:8 buf code;
+    let len = error_message_len message in
+    Iobuf.Fill.uint8_trunc buf len;
+    Iobuf.Fill.stringo buf (String.prefix message len)
   | Bool b ->
     fill_atom_head buf Tag.bool;
     Iobuf.Fill.uint8_trunc buf (Bool.to_int b)
@@ -381,7 +391,9 @@ let rec consume buf =
   else if tag = Tag.error
   then (
     let code = Iobuf.Consume.stringo buf ~len:8 in
-    Error (String.rstrip code ~drop:(Char.equal '\000')))
+    let len = Iobuf.Consume.uint8 buf in
+    let message = Iobuf.Consume.stringo buf ~len in
+    Error { code = String.rstrip code ~drop:(Char.equal '\000'); message })
   else if tag < 0
   then consume_atom buf ~tag:(-tag)
   else consume_vec buf ~tag

@@ -48,7 +48,10 @@ let test_atoms () =
   check_same "timestamp" (Value.Timestamp 123L);
   check_same "sym" (sym "upd");
   check_same "string" (Value.String "(+ 1 2)");
-  check_same "error" (Value.Error "domain");
+  check_same "error" (Value.Error { code = "domain"; message = "" });
+  check_same
+    "error with message"
+    (Value.Error { code = "type"; message = "expected i64, got sym" });
   check_same "float32 bits" (Value.Float32 0x7fc01234l);
   check_same "time" (Value.Time 1234);
   check_same "guid" (Value.Guid "0123456789abcdef");
