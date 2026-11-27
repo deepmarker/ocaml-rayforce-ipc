@@ -89,7 +89,8 @@ let verify_buffered_cancel () =
     let bytes = Bytes.create 2 in
     Reader.really_read input bytes
     >>= fun _ ->
-    Writer.write output "\003\000";
+    Writer.write_char output (Char.of_int_exn Wire.wire_version);
+    Writer.write_char output (Char.of_int_exn 0);
     Writer.flushed output >>= fun () -> Ivar.read finish
   in
   Tcp.Server.create
