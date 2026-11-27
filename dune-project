@@ -41,3 +41,17 @@
   async
   rayforce-ipc
   (alcotest :with-test)))
+
+(package
+ (name rayforce-ipc-server)
+ (synopsis "A RayforceDB IPC server on the Async scheduler")
+ (description
+  "The server end of RayforceDB's IPC protocol, over the encoder in rayforce-ipc: version handshake, optional credentials, and per-connection in-order handling of async and sync frames, with handler exceptions answered as rayforce error values.")
+ (depends
+  (ocaml
+   (>= 4.14.0))
+  core
+  core_kernel
+  async
+  rayforce-ipc
+  (rayforce-ipc-async :with-test)))

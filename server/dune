@@ -1,0 +1,6 @@
+(library
+ (name rayforce_ipc_server)
+ (public_name rayforce-ipc-server)
+ (preprocess
+  (pps ppx_jane))
+ (libraries core core_kernel.iobuf async rayforce-ipc))

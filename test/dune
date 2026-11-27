@@ -48,3 +48,17 @@
  (name test_live_cancel_async)
  (modules test_live_cancel_async)
  (libraries core async rayforce-ipc rayforce-ipc-async))
+
+(test
+ (name test_server)
+ (modules test_server)
+ (preprocess
+  (pps ppx_jane))
+ (libraries core async rayforce-ipc rayforce-ipc-async rayforce-ipc-server))
+
+(executable
+ (name bench_server)
+ (modules bench_server)
+ (preprocess
+  (pps ppx_jane))
+ (libraries core async rayforce-ipc rayforce-ipc-server))
