@@ -13,6 +13,11 @@ open Rayforce_ipc
 let sym s = Value.Sym (Sym.intern s)
 let eval conn s = Conn.send_sync conn (Value.String s)
 
+let int64s = function
+  | Value.Col c -> Array.init (Column.length c) ~f:(Column.get_int64 c)
+  | _ -> failwith "not a column"
+;;
+
 let check_eval conn expr expected =
   let got = eval conn expr in
   Alcotest.(check string)
@@ -26,20 +31,20 @@ let rows = 4
 let depth_batch () =
   Value.table
     [ ( "ts_evt"
-      , Value.Timestamps
+      , Value.timestamps
           (Array.init rows ~f:(fun i ->
              Int64.of_int
                (Timestamp.of_time_ns
                   (Time_ns.of_string_with_utc_offset
                      (sprintf "2026-09-18 12:00:0%d.5Z" i))))) )
     ; ( "instrument"
-      , Value.Syms
+      , Value.syms
           (Array.map [| "BTCUSDT"; "ETHUSDT"; "BTCUSDT"; "SOLUSDT" |] ~f:Sym.intern) )
     ; ( "px"
-      , Value.Ints (Array.init rows ~f:(fun i -> Int64.of_int ((i + 1) * 1_000_000_000)))
+      , Value.ints (Array.init rows ~f:(fun i -> Int64.of_int ((i + 1) * 1_000_000_000)))
       )
-    ; "price", Value.Floats (Array.init rows ~f:(fun i -> 1.5 +. float_of_int i))
-    ; "f_last", Value.Bools (Array.init rows ~f:(fun i -> i % 2 = 0))
+    ; "price", Value.floats (Array.init rows ~f:(fun i -> 1.5 +. float_of_int i))
+    ; "f_last", Value.bools (Array.init rows ~f:(fun i -> i % 2 = 0))
     ]
 ;;
 
@@ -50,7 +55,7 @@ let main port =
     ~f:(fun () ->
       (* Sync: the server parses and evaluates the string we sent. *)
       check_eval conn "(+ 1 2)" (Value.Int 3L);
-      check_eval conn "(til 4)" (Value.Ints [| 0L; 1L; 2L; 3L |]);
+      check_eval conn "(til 4)" (Value.ints [| 0L; 1L; 2L; 3L |]);
       (* Async: an ingest hook of the shape the tickerplant uses, so the
          batch is stored under the name the message carries rather than
          evaluated. *)
@@ -67,25 +72,25 @@ let main port =
       check_eval
         conn
         "(cols (at last_upd 2))"
-        (Value.Syms
+        (Value.syms
            (Array.map [| "ts_evt"; "instrument"; "px"; "price"; "f_last" |] ~f:Sym.intern));
       check_eval
         conn
         "(get (at last_upd 2) 'instrument)"
-        (Value.Syms
+        (Value.syms
            (Array.map [| "BTCUSDT"; "ETHUSDT"; "BTCUSDT"; "SOLUSDT" |] ~f:Sym.intern));
       check_eval
         conn
         "(get (at last_upd 2) 'px)"
-        (Value.Ints [| 1_000_000_000L; 2_000_000_000L; 3_000_000_000L; 4_000_000_000L |]);
+        (Value.ints [| 1_000_000_000L; 2_000_000_000L; 3_000_000_000L; 4_000_000_000L |]);
       check_eval
         conn
         "(get (at last_upd 2) 'price)"
-        (Value.Floats [| 1.5; 2.5; 3.5; 4.5 |]);
+        (Value.floats [| 1.5; 2.5; 3.5; 4.5 |]);
       check_eval
         conn
         "(get (at last_upd 2) 'f_last)"
-        (Value.Bools [| true; false; true; false |]);
+        (Value.bools [| true; false; true; false |]);
       (* The epoch offset is the easiest thing in the format to get wrong,
          and a server that disagrees says so in its own calendar. *)
       check_eval
@@ -108,11 +113,9 @@ let main port =
          (Sexp.to_string (Value.sexp_of_t got)));
       let spans = [| 0L; -1L; 86400000000000L; 9007199254740993L; Int64.min_value |] in
       let got =
-        Conn.send_sync conn (Value.List [| sym "temporal_echo"; Value.Timespans spans |])
+        Conn.send_sync conn (Value.List [| sym "temporal_echo"; Value.timespans spans |])
       in
-      (match got with
-       | Value.Timespans got -> Alcotest.(check (array int64)) "timespan vector" spans got
-       | _ -> failwith "timespan vector type");
+      Alcotest.(check (array int64)) "timespan vector" spans (int64s got);
       let null =
         Conn.send_sync conn (Value.List [| sym "nil?"; Value.Timespan Int64.min_value |])
       in
@@ -120,11 +123,9 @@ let main port =
        | Value.Bool true -> ()
        | _ -> failwith "timespan atom null");
       let empty =
-        Conn.send_sync conn (Value.List [| sym "temporal_echo"; Value.Timespans [||] |])
+        Conn.send_sync conn (Value.List [| sym "temporal_echo"; Value.timespans [||] |])
       in
-      (match empty with
-       | Value.Timespans a when Array.is_empty a -> ()
-       | _ -> failwith "empty timespan vector");
+      Alcotest.(check int) "empty timespan vector" 0 (Array.length (int64s empty));
       let col = Column.timespan () in
       Array.iter spans ~f:(Column.add_int64 col);
       let got =
@@ -132,19 +133,19 @@ let main port =
           conn
           (Value.List [| sym "temporal_echo"; Value.table [ "span", Value.Col col ] |])
       in
-      (match Value.column got "span" with
-       | Some (Value.Timespans got) ->
-         Alcotest.(check (array int64)) "timespan column" spans got
-       | _ -> failwith "timespan column type");
+      Alcotest.(check (array int64))
+        "timespan column"
+        spans
+        (int64s (Option.value_exn (Value.column got "span")));
       (* The server deserializes these values from the async message and
          serializes them again in the synchronous reply. *)
       let extra =
         Value.table
-          [ "short", Value.Shorts [| -7; 12 |]
-          ; "i32", Value.Int32s [| -42; 123456 |]
-          ; "date", Value.Dates [| 0; 1 |]
-          ; "time", Value.Times [| 0; 1234 |]
-          ; "f32", Value.Float32s [| 0x3f800000l; 0x40000000l |]
+          [ "short", Value.shorts [| -7; 12 |]
+          ; "i32", Value.int32s [| -42; 123456 |]
+          ; "date", Value.dates [| 0; 1 |]
+          ; "time", Value.times [| 0; 1234 |]
+          ; "f32", Value.float32s [| 0x3f800000l; 0x40000000l |]
           ; "guid", Value.Guids [| "0123456789abcdef"; "fedcba9876543210" |]
           ]
       in
@@ -166,9 +167,9 @@ let main port =
          small. *)
       let big =
         Value.table
-          [ "i", Value.Ints (Array.init 5000 ~f:Int64.of_int)
+          [ "i", Value.ints (Array.init 5000 ~f:Int64.of_int)
           ; ( "s"
-            , Value.Syms
+            , Value.syms
                 (Array.init 5000 ~f:(fun i -> Sym.intern (sprintf "s%d" (i % 97)))) )
           ]
       in

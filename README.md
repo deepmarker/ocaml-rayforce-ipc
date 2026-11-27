@@ -9,9 +9,9 @@ runs on.
 let conn = Rayforce_ipc.Conn.connect ~timeout_ms:5000 "127.0.0.1" 5010 in
 let batch =
   Rayforce_ipc.Value.table
-    [ "ts_evt", Timestamps ts
-    ; "instrument", Syms instruments
-    ; "px", Ints px
+    [ "ts_evt", Value.timestamps ts
+    ; "instrument", Value.syms instruments
+    ; "px", Value.ints px
     ]
 in
 Rayforce_ipc.Conn.send_async conn (List [| Sym (Sym.intern "upd"); Sym (Sym.intern "depth"); batch |])
@@ -22,10 +22,11 @@ Rayforce_ipc.Conn.send_async conn (List [| Sym (Sym.intern "upd"); Sym (Sym.inte
 | Module | What it is |
 |---|---|
 | `Sym` | Local intern table. A symbol travels as a string, so an id is ours alone — it exists so a column holds one int per row. |
-| `Value` | The value model, sized and filled straight into an `Iobuf`. A column is an ordinary OCaml array. |
+| `Value` | The value model, sized and filled straight into an `Iobuf`. A numeric, bool or symbol vector is a `Col`: a flat `Bigstring` at the type's own width, outside the OCaml heap. |
 | `Wire` | The 16-byte frame header, and the delta+RLE decoder for a compressed frame. |
 | `Conn` | A blocking client: connect, handshake, `send_async`, `send_sync`. |
 | `Rayforce_ipc_async.Conn` | The same, on the Async scheduler (package `rayforce-ipc-async`). A send hands the frame to the writer and returns, so a slow server backs up in a buffer rather than stalling the caller; and it satisfies `Persistent_connection_kernel.Closable`. |
+| `Rayforce_ipc_server.Server` | The other end, on Async (package `rayforce-ipc-server`): accepts connections, does the handshake and optional credentials, and hands each async/sync frame to your handlers. |
 | `Timestamp` | Checked conversion between Core Unix time and Rayforce's 2000-01-01 epoch. |
 | `Timespan` | Checked conversion between signed int64 nanoseconds and Core `Time_ns.Span`. |
 
@@ -72,7 +73,7 @@ value back through rayforce's own evaluator. It needs `rayforce` on PATH.
 
 ## Exact timestamps and timespans
 
-`Value.Timespan` and `Value.Timespans` carry signed int64 nanoseconds using
+`Value.Timespan` and `Value.timespans` / `Column.timespan` carry signed int64 nanoseconds using
 Rayforce tag 16. `Column.timespan` supports the reusable column-builder path
 with `Column.add_int64`. No epoch offset is applied to spans. Raw values retain
 the entire engine range; `INT64_MIN` denotes null.
@@ -124,3 +125,53 @@ flagged atom asks Rayforce to apply its own typed-null semantics, which can
 canonicalize the payload. Vector nulls use the engine's per-type sentinels.
 The client uses TCP and does not negotiate shared-memory or RDMA transports.
 Index objects are not serializable by Rayforce and are not supported here.
+
+Every i64, f64, timespan, timestamp, bool, sym, i16, i32, date, time and f32
+vector is a `Value.Col`, whether decoded off the wire or written as a literal
+(`Value.ints`, `Value.syms`, `Value.float32s`, ...): a flat `Bigstring` at the
+type's own width, filled or written by one blit, read with the `Column.get_*`
+accessors. A producer accumulating rows uses `Column` directly and skips the
+array. f32 cells are their IEEE-754 bits (`get_float32_bits`), so a NaN
+payload survives exactly; `get_float32` converts. Only guid and string
+vectors are still OCaml arrays.
+
+## Server
+
+`Rayforce_ipc_server.Server.create` listens, performs the version handshake
+(asking for credentials only if `~authenticate` is given) and serves each
+connection strictly in order, since frames carry no request ids. `on_async`
+handles fire-and-forget frames; `on_sync` computes the response, and an
+exception from it, or an undecodable sync payload, is answered with a
+Rayforce error value instead of dropping the connection. `Peer.push` sends
+a value to a client as an async frame. A bad frame header, another wire
+version or a stray response frame closes only that connection.
+`test/test_server.ml` runs it against the Async client over loopback.
+
+### Server performance
+
+Measured against rayfall's own client over loopback TCP (the client's
+`transport 'tcp`; two rayforce processes on one host otherwise move to
+shared memory, which this library does not implement):
+
+| Round trip | rayforce server | this server |
+|---|---|---|
+| small sync call | ~8.5 µs | ~8.5 µs (one `read`, `writev`, `epoll_wait` each) |
+| 48 KB table echoed | 34 µs | 31 µs |
+| 240 KB table echoed | 122 µs | 250 µs, 129 µs with the GC setting below |
+| 1.2 MB table echoed | 482 µs | 1849 µs, 1048 µs with the setting |
+
+Each decoded frame allocates its columns as Bigarrays, which the OCaml GC
+counts as external memory and answers by marking more often. That is
+negligible up to a few tens of kilobytes a frame and roughly doubles the
+cost at hundreds. A process serving batches of that size should raise the
+custom-block ratio, from its binary and not from this library, since the
+setting is process-wide:
+
+```ocaml
+Gc.tune ~custom_major_ratio:1000 ()
+(* or OCAMLRUNPARAM=M=1000 *)
+```
+
+An echo is the worst case, as it also pays to encode what it decoded. Multi-megabyte
+bulk transfers stay 2x or more behind the C server even with the setting;
+fixing that means reusing column buffers across frames, which is not done.

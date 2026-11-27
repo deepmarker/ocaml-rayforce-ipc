@@ -3,13 +3,11 @@ open! Core
 (** A rayforce value, in the shape the wire format describes it.
 
     This is not a mirror of rayforce's in-memory [ray_t]: it carries only
-    what the format carries, which is why a column is an ordinary OCaml
-    array and not a reference into a foreign heap. Serializing writes the
-    array straight into the frame, so the only copy between a producer's
-    accumulator and the socket is the one it makes itself.
-
-    The array constructors are the convenient way to write a value; {!Col}
-    is the way to build one a row at a time without allocating.
+    what the format carries. A numeric, bool or symbol vector is a {!Col}: a
+    flat buffer outside the OCaml heap, so a decoded column is one blit out
+    of the frame and a producer's column is one blit into it, with nothing
+    boxed in between. Build one row at a time with {!Column}, or from an array
+    with the literals below ({!ints}, {!syms}, ...).
 
     Columns are always written without the HAS_NULLS attribute. Rayforce
     encodes nulls as per-type sentinels in the payload, so a null column
@@ -33,23 +31,15 @@ type t =
   | Date of int (** days since 2000-01-01 *)
   | Sym of Sym.t
   | String of string
-  | Bools of bool array
   | Bytes of Bigstring.t
-  | Shorts of int array
-  | Int32s of int array
-  | Dates of int array
-  | Times of int array
-  | Float32s of int32 array
   | Guids of string array
-  | Ints of int64 array
-  | Floats of float array
-  | Timespans of int64 array (** INT64_MIN entries represent null. *)
-  | Timestamps of int64 array
-  | Syms of Sym.t array
   | Strings of string array
   | Col of Column.t
-  (** A column built row by row, already in wire layout. What a producer
-          should use: see {!Column}. *)
+  (** Every numeric, bool and symbol vector, in wire layout: a flat buffer
+      outside the OCaml heap, read with the {!Column} accessors. What a
+      producer builds row by row, and what decoding returns; the literals
+      below ({!ints}, {!syms}, ...) build one from an array. For the
+      timespan and timestamp types, INT64_MIN entries represent null. *)
   | List of t array
   | Table of column array
   | Dict of t * t
@@ -92,3 +82,21 @@ val length : t -> int
 val nrows : t -> int
 val ncols : t -> int
 val column : t -> string -> t option
+
+(** {2 Vector literals}
+
+    Each builds a {!Col} of the type's own width from an array, which is how
+    a vector is written when it is not accumulated row by row. [float32s]
+    takes IEEE-754 bit patterns, [dates] days and [times] milliseconds. *)
+
+val ints : int64 array -> t
+val floats : float array -> t
+val bools : bool array -> t
+val syms : Sym.t array -> t
+val timespans : int64 array -> t
+val timestamps : int64 array -> t
+val shorts : int array -> t
+val int32s : int array -> t
+val dates : int array -> t
+val times : int array -> t
+val float32s : int32 array -> t

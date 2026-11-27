@@ -2,7 +2,7 @@ open Core
 open Rayforce_ipc
 
 let sym s = Value.Sym (Sym.intern s)
-let syms_of l = Value.Syms (Array.of_list_map l ~f:Sym.intern)
+let syms_of l = Value.syms (Array.of_list_map l ~f:Sym.intern)
 let syms = syms_of
 
 let roundtrip v =
@@ -26,13 +26,13 @@ let check_same name v =
 let batch ~rows =
   Value.table
     [ ( "ts_evt"
-      , Value.Timestamps
+      , Value.timestamps
           (Array.init rows ~f:(fun i -> Int64.of_int (800_000_000_000_000_000 + i))) )
     ; ( "instrument"
-      , Value.Syms (Array.init rows ~f:(fun i -> Sym.intern (sprintf "S%d" (i % 7)))) )
-    ; "px", Value.Ints (Array.init rows ~f:(fun i -> Int64.of_int (i * 100)))
-    ; "price", Value.Floats (Array.init rows ~f:(fun i -> float_of_int i /. 8.))
-    ; "f_last", Value.Bools (Array.init rows ~f:(fun i -> i % 2 = 0))
+      , Value.syms (Array.init rows ~f:(fun i -> Sym.intern (sprintf "S%d" (i % 7)))) )
+    ; "px", Value.ints (Array.init rows ~f:(fun i -> Int64.of_int (i * 100)))
+    ; "price", Value.floats (Array.init rows ~f:(fun i -> float_of_int i /. 8.))
+    ; "f_last", Value.bools (Array.init rows ~f:(fun i -> i % 2 = 0))
     ]
 ;;
 
@@ -62,27 +62,27 @@ let test_atoms () =
     (Value.Lambda
        ( Value.List [||]
        , Value.Int 42L
-       , Some (Value.Dict (Value.Syms [||], Value.List [||])) ));
+       , Some (Value.Dict (Value.syms [||], Value.List [||])) ));
   check_same "unary" (Value.Unary "long_builtin_name");
   check_same "binary" (Value.Binary "+");
   check_same "variadic" (Value.Variadic "list")
 ;;
 
 let test_vectors () =
-  check_same "bools" (Value.Bools [| true; false; true |]);
-  check_same "shorts" (Value.Shorts [| -32768; 32767 |]);
-  check_same "int32s" (Value.Int32s [| -2147483648; 2147483647 |]);
-  check_same "dates" (Value.Dates [| 0; -1 |]);
-  check_same "times" (Value.Times [| 0; 1234 |]);
-  check_same "float32s" (Value.Float32s [| 0l; 0x7fc01234l; Int32.min_value |]);
+  check_same "bools" (Value.bools [| true; false; true |]);
+  check_same "shorts" (Value.shorts [| -32768; 32767 |]);
+  check_same "int32s" (Value.int32s [| -2147483648; 2147483647 |]);
+  check_same "dates" (Value.dates [| 0; -1 |]);
+  check_same "times" (Value.times [| 0; 1234 |]);
+  check_same "float32s" (Value.float32s [| 0l; 0x7fc01234l; Int32.min_value |]);
   check_same "guids" (Value.Guids [| "0123456789abcdef"; "fedcba9876543210" |]);
-  check_same "ints" (Value.Ints [| 0L; -1L; Int64.max_value |]);
-  check_same "floats" (Value.Floats [| 0.; -1.25; Float.max_value |]);
-  check_same "timestamps" (Value.Timestamps [| 0L; 1L |]);
+  check_same "ints" (Value.ints [| 0L; -1L; Int64.max_value |]);
+  check_same "floats" (Value.floats [| 0.; -1.25; Float.max_value |]);
+  check_same "timestamps" (Value.timestamps [| 0L; 1L |]);
   check_same "syms" (syms [ "BTCUSDT"; "ETHUSDT"; "BTCUSDT" ]);
   check_same "strings" (Value.Strings [| ""; "a"; "the quick brown fox" |]);
-  check_same "empty syms" (Value.Syms [||]);
-  check_same "empty ints" (Value.Ints [||])
+  check_same "empty syms" (Value.syms [||]);
+  check_same "empty ints" (Value.ints [||])
 ;;
 
 let test_columns () =
@@ -119,10 +119,10 @@ let test_columns () =
     (Sexp.to_string
        (Value.sexp_of_t
           (Value.table
-             [ "i", Value.Ints [| 0L; 1000L; 2000L; 3000L |]
+             [ "i", Value.ints [| 0L; 1000L; 2000L; 3000L |]
              ; "s", syms_of [ "BTCUSDT"; "ETHUSDT"; "BTCUSDT"; "SOLUSDT" ]
-             ; "f", Value.Bools [| true; false; true; false |]
-             ; "px", Value.Floats [| 0.; 0.25; 0.5; 0.75 |]
+             ; "f", Value.bools [| true; false; true; false |]
+             ; "px", Value.floats [| 0.; 0.25; 0.5; 0.75 |]
              ])))
     (Sexp.to_string (Value.sexp_of_t got));
   Column.clear ints;
@@ -133,7 +133,7 @@ let test_compound () =
   check_same "table" (batch ~rows:3);
   check_same "empty table" (batch ~rows:0);
   check_same "upd message" (Value.List [| sym "upd"; sym "depth"; batch ~rows:2 |]);
-  check_same "dict" (Value.Dict (syms [ "a"; "b" ], Value.Ints [| 1L; 2L |]));
+  check_same "dict" (Value.Dict (syms [ "a"; "b" ], Value.ints [| 1L; 2L |]));
   check_same "nested list" (Value.List [| Value.List [| Value.Int 1L |]; Value.Null |])
 ;;
 
@@ -148,7 +148,7 @@ let test_table_accessors () =
     (Value.Protocol_error "table: column b has 1 rows, a has 2")
     (fun () ->
        ignore
-         (Value.table [ "a", Value.Ints [| 1L; 2L |]; "b", Value.Ints [| 1L |] ]
+         (Value.table [ "a", Value.ints [| 1L; 2L |]; "b", Value.ints [| 1L |] ]
           : Value.t))
 ;;
 
@@ -244,6 +244,85 @@ let test_decompress () =
     Alcotest.(check string) (sprintf "case %d" i) s (Bigstring.to_string got))
 ;;
 
+(* The narrow types are held at their own width, and a column of them goes
+   out as one blit and comes back as a [Col], not as an array. *)
+let narrow_columns () =
+  let i16 = Column.i16 ()
+  and i32 = Column.i32 ()
+  and date = Column.date ()
+  and time = Column.time ()
+  and f32 = Column.f32 () in
+  let i16_values = [ 0; 1; -1; 32767; -32768 ]
+  and i32_values = [ 0; 1; -1; 2147483647; -2147483648 ]
+  and f32_bits = [ 0x3f800000l; 0xbf800000l; 0x7fa00001l; 0x7fc00000l; 0xffffffffl ] in
+  List.iter i16_values ~f:(Column.add_int16 i16);
+  List.iter i32_values ~f:(Column.add_int32 i32);
+  List.iter i32_values ~f:(Column.add_int32 date);
+  List.iter i32_values ~f:(Column.add_int32 time);
+  List.iter f32_bits ~f:(Column.add_float32_bits f32);
+  let sizes = List.map [ i16; i32; date; time; f32 ] ~f:Column.wire_size in
+  Alcotest.(check (list int)) "cells are 2 or 4 bytes" [ 10; 20; 20; 20; 20 ] sizes;
+  let table =
+    Value.table
+      [ "i16", Col i16
+      ; "i32", Col i32
+      ; "date", Col date
+      ; "time", Col time
+      ; "f32", Col f32
+      ]
+  in
+  let got = roundtrip table in
+  let column name =
+    match Value.column got name with
+    | Some (Value.Col c) -> c
+    | _ -> Alcotest.failf "%s did not decode to a Col" name
+  in
+  let read c ~f = List.init (Column.length c) ~f:(f c) in
+  Alcotest.(check (list int)) "i16" i16_values (read (column "i16") ~f:Column.get_int16);
+  Alcotest.(check (list int)) "i32" i32_values (read (column "i32") ~f:Column.get_int32);
+  Alcotest.(check (list int)) "date" i32_values (read (column "date") ~f:Column.get_int32);
+  Alcotest.(check (list int)) "time" i32_values (read (column "time") ~f:Column.get_int32);
+  Alcotest.(check (list int32))
+    "f32 bits survive, signaling NaN included"
+    f32_bits
+    (read (column "f32") ~f:Column.get_float32_bits);
+  (* The same table written with the literal constructors is the same value. *)
+  let as_arrays =
+    Value.table
+      [ "i16", Value.shorts (Array.of_list i16_values)
+      ; "i32", Value.int32s (Array.of_list i32_values)
+      ; "date", Value.dates (Array.of_list i32_values)
+      ; "time", Value.times (Array.of_list i32_values)
+      ; "f32", Value.float32s (Array.of_list f32_bits)
+      ]
+  in
+  Alcotest.(check string)
+    "a decoded table equals the one built from literals"
+    (Sexp.to_string (Value.sexp_of_t as_arrays))
+    (Sexp.to_string (Value.sexp_of_t got));
+  (* And a vector written from an array decodes into a Col of the same cells. *)
+  (match roundtrip (Value.int32s [| 7; -7 |]) with
+   | Value.Col c -> Alcotest.(check int) "decoded int32s" (-7) (Column.get_int32 c 1)
+   | _ -> Alcotest.fail "Int32s did not decode to a Col");
+  List.iter
+    [ Value.shorts [||]
+    ; Value.int32s [||]
+    ; Value.dates [||]
+    ; Value.times [||]
+    ; Value.float32s [||]
+    ]
+    ~f:(fun empty ->
+      match roundtrip empty with
+      | Value.Col c -> Alcotest.(check int) "empty column" 0 (Column.length c)
+      | _ -> Alcotest.fail "empty narrow vector did not decode to a Col");
+  Alcotest.(check (float 0.))
+    "f32 as a float"
+    1.5
+    (let c = Column.f32 () in
+     Column.add_float32 c 1.5;
+     Column.get_float32 c 0)
+;;
+
 let () =
   Alcotest.run
     "rayforce-ipc"
@@ -253,6 +332,7 @@ let () =
         ; Alcotest.test_case "compound" `Quick test_compound
         ; Alcotest.test_case "table accessors" `Quick test_table_accessors
         ; Alcotest.test_case "columns" `Quick test_columns
+        ; Alcotest.test_case "narrow columns" `Quick narrow_columns
         ] )
     ; ( "frames"
       , [ Alcotest.test_case "round trip" `Quick test_frame

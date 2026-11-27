@@ -23,19 +23,8 @@ type t =
   | Date of int
   | Sym of Sym.t
   | String of string
-  | Bools of bool array
   | Bytes of Bigstring.t
-  | Shorts of int array
-  | Int32s of int array
-  | Dates of int array
-  | Times of int array
-  | Float32s of int32 array
   | Guids of string array
-  | Ints of int64 array
-  | Floats of float array
-  | Timespans of int64 array
-  | Timestamps of int64 array
-  | Syms of Sym.t array
   | Strings of string array
   | Col of Column.t
   | List of t array
@@ -64,14 +53,8 @@ let fail fmt = Printf.ksprintf (fun s -> raise (Protocol_error s)) fmt
 let error_message_len message = Int.min (String.length message) 255
 
 let rec length = function
-  | Bools a -> Array.length a
   | Bytes b -> Bigstring.length b
-  | Shorts a | Int32s a | Dates a | Times a -> Array.length a
-  | Float32s a -> Array.length a
   | Guids a -> Array.length a
-  | Ints a | Timestamps a | Timespans a -> Array.length a
-  | Floats a -> Array.length a
-  | Syms a -> Array.length a
   | Strings a -> Array.length a
   | Col c -> Column.length c
   | List a -> Array.length a
@@ -147,15 +130,8 @@ let rec size = function
   | Int _ | Float _ | Timestamp _ | Timespan _ -> atom 8
   | Sym s -> atom (cstring (Sym.to_string s))
   | String s -> atom (8 + String.length s)
-  | Bools a -> vec (Array.length a)
   | Bytes b -> vec (Bigstring.length b)
-  | Shorts a -> vec (Array.length a * 2)
-  | Int32s a | Dates a | Times a -> vec (Array.length a * 4)
-  | Float32s a -> vec (Array.length a * 4)
   | Guids a -> vec (Array.length a * 16)
-  | Ints a | Timestamps a | Timespans a -> vec (Array.length a * 8)
-  | Floats a -> vec (Array.length a * 8)
-  | Syms a -> vec (sym_bytes a)
   | Strings a -> vec (sum_by a ~f:(fun s -> 8 + String.length s))
   | Col c -> vec (Column.wire_size c)
   | List a -> vec (sum_by a ~f:size)
@@ -269,45 +245,14 @@ let rec fill buf t =
     fill_atom_head buf Tag.str;
     Iobuf.Fill.int64_le buf (String.length s);
     Iobuf.Fill.stringo buf s
-  | Bools a ->
-    fill_vec_head buf Tag.bool (Array.length a);
-    fill_each a ~f:(fun b -> Iobuf.Fill.uint8_trunc buf (Bool.to_int b))
   | Bytes b ->
     fill_vec_head buf Tag.u8 (Bigstring.length b);
     Iobuf.Fill.bigstringo buf b
-  | Shorts a ->
-    fill_vec_head buf Tag.i16 (Array.length a);
-    fill_each a ~f:(Iobuf.Fill.int16_le_trunc buf)
-  | (Int32s a | Dates a | Times a) as v ->
-    let tag =
-      match v with
-      | Int32s _ -> Tag.i32
-      | Dates _ -> Tag.date
-      | _ -> Tag.time
-    in
-    fill_vec_head buf tag (Array.length a);
-    fill_each a ~f:(Iobuf.Fill.int32_le_trunc buf)
-  | Float32s a ->
-    fill_vec_head buf Tag.f32 (Array.length a);
-    fill_each a ~f:(fun n -> Iobuf.Fill.int32_le_trunc buf (Int32.to_int_exn n))
   | Guids a ->
     fill_vec_head buf Tag.guid (Array.length a);
     fill_each a ~f:(fun bytes ->
       if String.length bytes <> 16 then fail "GUID must contain 16 bytes";
       Iobuf.Fill.stringo buf bytes)
-  | Ints a ->
-    fill_vec_head buf Tag.i64 (Array.length a);
-    fill_each a ~f:(fun n -> Iobuf.Fill.int64_t_le buf n)
-  | Timespans a ->
-    fill_vec_head buf Tag.timespan (Array.length a);
-    fill_each a ~f:(fun n -> Iobuf.Fill.int64_t_le buf n)
-  | Timestamps a ->
-    fill_vec_head buf Tag.timestamp (Array.length a);
-    fill_each a ~f:(fun n -> Iobuf.Fill.int64_t_le buf n)
-  | Floats a ->
-    fill_vec_head buf Tag.f64 (Array.length a);
-    fill_each a ~f:(fun f -> Iobuf.Fill.int64_t_le buf (Int64.bits_of_float f))
-  | Syms a -> fill_syms buf a
   | Strings a ->
     fill_vec_head buf Tag.str (Array.length a);
     fill_each a ~f:(fun s ->
@@ -384,6 +329,32 @@ let init_in_order len ~f =
     a)
 ;;
 
+(* The vector types a [Col] holds. They decode into a flat buffer rather than
+   an array of boxed cells; the rest (guids, strings) are rare enough that an
+   array is fine. *)
+let is_flat t =
+  t = Tag.i64
+  || t = Tag.f64
+  || t = Tag.timespan
+  || t = Tag.timestamp
+  || t = Tag.bool
+  || t = Tag.sym
+  || t = Tag.i16
+  || t = Tag.i32
+  || t = Tag.date
+  || t = Tag.time
+  || t = Tag.f32
+;;
+
+let consume_flat_sym buf = Sym.intern (consume_cstring buf)
+
+let consume_flat buf ~tag ~len =
+  let width = Column.width_of_tag tag in
+  if tag <> Tag.sym && len * width > Iobuf.length buf
+  then fail "vector of %d elements overruns the %d bytes left" len (Iobuf.length buf);
+  Col (Column.consume (Iobuf.read_only buf) ~tag ~len ~consume_sym:consume_flat_sym)
+;;
+
 let rec consume buf =
   let tag = Iobuf.Consume.int8 buf in
   if tag = Tag.null
@@ -451,7 +422,8 @@ and consume_vec buf ~tag =
        neither is a table on its own. *)
       let names =
         match consume buf with
-        | Syms names -> names
+        | Col c when Column.tag c = Tag.sym ->
+          Array.init (Column.length c) ~f:(Column.get_sym c)
         | v ->
           fail "table schema is a %s, not a symbol vector" (Sexp.to_string (sexp_of_t v))
       in
@@ -474,31 +446,10 @@ and consume_vec buf ~tag =
     | t ->
       let len = consume_len buf ~what:"vector" in
       (match t with
-       | t when t = Tag.bool ->
-         Bools (init_in_order len ~f:(fun () -> Iobuf.Consume.uint8 buf <> 0))
+       | t when is_flat t -> consume_flat buf ~tag:t ~len
        | t when t = Tag.u8 -> Bytes (Iobuf.Consume.bigstringo buf ~len)
-       | t when t = Tag.i16 ->
-         Shorts (init_in_order len ~f:(fun () -> Iobuf.Consume.int16_le buf))
-       | t when t = Tag.i32 ->
-         Int32s (init_in_order len ~f:(fun () -> Iobuf.Consume.int32_le buf))
-       | t when t = Tag.date ->
-         Dates (init_in_order len ~f:(fun () -> Iobuf.Consume.int32_le buf))
-       | t when t = Tag.time ->
-         Times (init_in_order len ~f:(fun () -> Iobuf.Consume.int32_le buf))
-       | t when t = Tag.f32 ->
-         Float32s
-           (init_in_order len ~f:(fun () -> Int32.of_int_exn (Iobuf.Consume.int32_le buf)))
        | t when t = Tag.guid ->
          Guids (init_in_order len ~f:(fun () -> Iobuf.Consume.stringo buf ~len:16))
-       | t when t = Tag.i64 ->
-         Ints (init_in_order len ~f:(fun () -> Iobuf.Consume.int64_t_le buf))
-       | t when t = Tag.timespan ->
-         Timespans (init_in_order len ~f:(fun () -> Iobuf.Consume.int64_t_le buf))
-       | t when t = Tag.timestamp ->
-         Timestamps (init_in_order len ~f:(fun () -> Iobuf.Consume.int64_t_le buf))
-       | t when t = Tag.f64 -> Floats (init_in_order len ~f:(fun () -> consume_float buf))
-       | t when t = Tag.sym ->
-         Syms (init_in_order len ~f:(fun () -> Sym.intern (consume_cstring buf)))
        | t when t = Tag.str ->
          Strings
            (init_in_order len ~f:(fun () ->
@@ -506,4 +457,38 @@ and consume_vec buf ~tag =
               Iobuf.Consume.stringo buf ~len:slen))
        | t when t = Tag.list -> List (init_in_order len ~f:(fun () -> consume buf))
        | t -> fail "vector type %d is not a rayforce type" t))
+;;
+
+(* ===== Building ===== *)
+
+(* The constructors for writing a vector as a literal: they build the same
+   [Col] a producer would, so a value written here and one decoded off the
+   wire are the same representation. A producer accumulating rows should
+   use {!Column} directly and skip the array. *)
+let of_array col a ~add =
+  Array.iter a ~f:(add col);
+  Col col
+;;
+
+let capacity a = Int.max 1 (Array.length a)
+let ints a = of_array (Column.i64 ~capacity:(capacity a) ()) a ~add:Column.add_int64
+let floats a = of_array (Column.f64 ~capacity:(capacity a) ()) a ~add:Column.add_float
+let bools a = of_array (Column.bool ~capacity:(capacity a) ()) a ~add:Column.add_bool
+let syms a = of_array (Column.sym ~capacity:(capacity a) ()) a ~add:Column.add_sym
+
+let timespans a =
+  of_array (Column.timespan ~capacity:(capacity a) ()) a ~add:Column.add_int64
+;;
+
+let timestamps a =
+  of_array (Column.timestamp ~capacity:(capacity a) ()) a ~add:Column.add_int64
+;;
+
+let shorts a = of_array (Column.i16 ~capacity:(capacity a) ()) a ~add:Column.add_int16
+let int32s a = of_array (Column.i32 ~capacity:(capacity a) ()) a ~add:Column.add_int32
+let dates a = of_array (Column.date ~capacity:(capacity a) ()) a ~add:Column.add_int32
+let times a = of_array (Column.time ~capacity:(capacity a) ()) a ~add:Column.add_int32
+
+let float32s a =
+  of_array (Column.f32 ~capacity:(capacity a) ()) a ~add:Column.add_float32_bits
 ;;

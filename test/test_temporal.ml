@@ -1,6 +1,11 @@
 open Core
 open Rayforce_ipc
 
+let int64s = function
+  | Value.Col c -> Array.init (Column.length c) ~f:(Column.get_int64 c)
+  | _ -> failwith "not a column"
+;;
+
 let roundtrip value =
   let buf = Iobuf.create ~len:(Value.size value) in
   Value.fill buf value;
@@ -19,17 +24,15 @@ let () =
     [ 0L; 1L; -1L; 86400000000000L; 9007199254740993L; Int64.min_value; Int64.max_value ]
     ~f:(fun n -> roundtrip (Value.Timespan n));
   let ns = [| 0L; -1L; 9007199254740993L; Int64.min_value; Int64.max_value |] in
-  roundtrip (Value.Timespans ns);
-  roundtrip (Value.Timespans [||]);
-  roundtrip (Value.table [ "duration", Timespans ns ]);
+  roundtrip (Value.timespans ns);
+  roundtrip (Value.timespans [||]);
+  roundtrip (Value.table [ "duration", Value.timespans ns ]);
   let col = Column.timespan () in
   Array.iter ns ~f:(Column.add_int64 col);
   let buf = Iobuf.create ~len:(Value.size (Value.Col col)) in
   Value.fill buf (Value.Col col);
   Iobuf.flip_lo buf;
-  (match Value.consume buf with
-   | Timespans values -> assert (Array.equal Int64.equal ns values)
-   | _ -> assert false);
+  assert (Array.equal Int64.equal ns (int64s (Value.consume buf)));
   let lower = Int63.to_int64 Int63.min_value
   and upper = Int63.to_int64 Int63.max_value in
   List.iter [ lower; upper; 0L; -1L; 9007199254740993L ] ~f:(fun n ->

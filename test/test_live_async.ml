@@ -70,18 +70,18 @@ let main port =
        check_eval
          conn
          "(get (at last_upd 2) 'instrument)"
-         (Value.Syms
+         (Value.syms
             (Array.map [| "BTCUSDT"; "ETHUSDT"; "BTCUSDT"; "SOLUSDT" |] ~f:Sym.intern))
        >>= fun () ->
        check_eval
          conn
          "(get (at last_upd 2) 'px)"
-         (Value.Ints [| 1_000_000_000L; 2_000_000_000L; 3_000_000_000L; 4_000_000_000L |])
+         (Value.ints [| 1_000_000_000L; 2_000_000_000L; 3_000_000_000L; 4_000_000_000L |])
        >>= fun () ->
        check_eval
          conn
          "(get (at last_upd 2) 'f_last)"
-         (Value.Bools [| true; false; true; false |])
+         (Value.bools [| true; false; true; false |])
        >>= fun () ->
        check_eval
          conn
@@ -93,7 +93,7 @@ let main port =
        check_eval
          conn
          "(enlist 0D00:00:00.000000001 -0D00:00:00.000000001)"
-         (Value.Timespans [| 1L; -1L |])
+         (Value.timespans [| 1L; -1L |])
        >>= fun () ->
        (* A batch well past the frame's compression threshold, written
          without the caller ever blocking on the socket. *)

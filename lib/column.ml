@@ -19,6 +19,11 @@ let f64 ?capacity () = create ?capacity ~width:8 ~tag:Tag.f64 ()
 let timespan ?capacity () = create ?capacity ~width:8 ~tag:Tag.timespan ()
 let timestamp ?capacity () = create ?capacity ~width:8 ~tag:Tag.timestamp ()
 let bool ?capacity () = create ?capacity ~width:1 ~tag:Tag.bool ()
+let i16 ?capacity () = create ?capacity ~width:2 ~tag:Tag.i16 ()
+let i32 ?capacity () = create ?capacity ~width:4 ~tag:Tag.i32 ()
+let date ?capacity () = create ?capacity ~width:4 ~tag:Tag.date ()
+let time ?capacity () = create ?capacity ~width:4 ~tag:Tag.time ()
+let f32 ?capacity () = create ?capacity ~width:4 ~tag:Tag.f32 ()
 let sym ?capacity () = create ?capacity ~width:8 ~tag:Tag.sym ()
 let length t = t.len
 
@@ -54,6 +59,14 @@ let add_float t f =
   Bigstring.unsafe_set_int64_t_le t.buf ~pos:(next t) (Int64.bits_of_float f)
 ;;
 
+(* The narrow types are written at their own width, so one cell is 2 or 4
+   bytes in the buffer as on the wire. [add_int32] serves i32, date and time,
+   which share a layout; an f32 cell is its IEEE-754 bits, never a float
+   round-tripped through binary64, which may quiet a NaN payload. *)
+let add_int16 t n = Bigstring.unsafe_set_int16_le t.buf ~pos:(next t) n
+let add_int32 t n = Bigstring.unsafe_set_int32_le t.buf ~pos:(next t) n
+let add_float32_bits t bits = Bigstring.unsafe_set_int32_t_le t.buf ~pos:(next t) bits
+let add_float32 t f = add_float32_bits t (Int32.bits_of_float f)
 let add_bool t b = Bigstring.unsafe_set_uint8 t.buf ~pos:(next t) (Bool.to_int b)
 
 (* The wire length is accumulated as rows arrive so that sizing the column
@@ -83,6 +96,24 @@ let get_float t i =
   Int64.float_of_bits (Bigstring.unsafe_get_int64_t_le t.buf ~pos:(i * t.width))
 ;;
 
+let get_int16 t i =
+  check t i;
+  Bigstring.unsafe_get_int16_le t.buf ~pos:(i * t.width)
+;;
+
+let get_int32 t i =
+  check t i;
+  Bigstring.unsafe_get_int32_le t.buf ~pos:(i * t.width)
+;;
+
+let get_float32_bits t i =
+  check t i;
+  expect t Tag.f32 "float32s";
+  Bigstring.unsafe_get_int32_t_le t.buf ~pos:(i * t.width)
+;;
+
+let get_float32 t i = Int32.float_of_bits (get_float32_bits t i)
+
 let get_bool t i =
   check t i;
   expect t Tag.bool "bools";
@@ -103,6 +134,12 @@ let sexp_of_t t =
     | tag when tag = Tag.bool -> "Bools", fun i -> [%sexp (get_bool t i : bool)]
     | tag when tag = Tag.sym ->
       "Syms", fun i -> [%sexp (Sym.to_string (get_sym t i) : string)]
+    | tag when tag = Tag.i16 -> "Shorts", fun i -> [%sexp (get_int16 t i : int)]
+    | tag when tag = Tag.i32 -> "Int32s", fun i -> [%sexp (get_int32 t i : int)]
+    | tag when tag = Tag.date -> "Dates", fun i -> [%sexp (get_int32 t i : int)]
+    | tag when tag = Tag.time -> "Times", fun i -> [%sexp (get_int32 t i : int)]
+    | tag when tag = Tag.f32 ->
+      "Float32s", fun i -> [%sexp (get_float32_bits t i : Int32.t)]
     | tag when tag = Tag.timespan ->
       "Timespans", fun i -> [%sexp (get_int64 t i : Int64.t)]
     | tag when tag = Tag.timestamp ->
@@ -133,4 +170,37 @@ let fill buf t =
       let s = Sym.wire (Sym.unsafe_of_int id) in
       Iobuf.Fill.string buf s ~str_pos:0 ~len:(String.length s)
     done
+;;
+
+(* ===== Decoding ===== *)
+
+let width_of_tag tag =
+  if tag = Tag.bool
+  then 1
+  else if tag = Tag.i16
+  then 2
+  else if tag = Tag.i32 || tag = Tag.date || tag = Tag.time || tag = Tag.f32
+  then 4
+  else 8
+;;
+
+(* The inverse of [fill], for a vector of [len] rows read off the wire. A
+   fixed-width column is one blit out of the frame -- no box per cell, which
+   is what the collector spent most of its time on when a decoded table was
+   made of arrays. A sym column interns each string, which it must. The
+   capacity is never zero, and the caller has checked that a fixed-width
+   column fits in what is left of the frame, so that a column read empty can still grow. *)
+let consume buf ~tag ~len ~consume_sym =
+  let width = width_of_tag tag in
+  let t = create ~capacity:(Int.max 1 len) ~width ~tag () in
+  if tag = Tag.sym
+  then
+    for _ = 1 to len do
+      add_sym t (consume_sym buf)
+    done
+  else (
+    let bytes = len * width in
+    Iobuf.Consume.To_bigstring.blit ~src:buf ~dst:t.buf ~dst_pos:0 ~len:bytes;
+    t.len <- len);
+  t
 ;;
